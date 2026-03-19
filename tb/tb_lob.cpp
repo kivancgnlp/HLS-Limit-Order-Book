@@ -1,7 +1,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "lob.hpp"
+#include "../src/lob.hpp"
 
 namespace {
 
