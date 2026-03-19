@@ -109,6 +109,27 @@ void summarize_book(const LimitOrderBook &book, BookSummary &summary);
 void process_command(LimitOrderBook &book, const Command &cmd, CommandResult &result);
 
 extern "C" void lob_top(const Command &cmd, CommandResult &result);
+extern "C" void lob_axi_peripheral(std::uint32_t cmd_type,
+                                   std::uint32_t side,
+                                   std::uint32_t order_id,
+                                   int price,
+                                   int quantity,
+                                   std::uint32_t &accepted,
+                                   std::uint32_t &result_code,
+                                   int &touched_price,
+                                   int &touched_total_quantity,
+                                   std::uint32_t &touched_order_count,
+                                   int &executed_quantity,
+                                   int &cancelled_quantity,
+                                   int &remaining_quantity,
+                                   int &last_trade_price,
+                                   std::uint32_t &trade_count,
+                                   int &best_bid_price,
+                                   int &best_bid_quantity,
+                                   int &best_ask_price,
+                                   int &best_ask_quantity,
+                                   std::uint32_t &bid_level_count,
+                                   std::uint32_t &ask_level_count);
 
 }  // namespace lob
 

@@ -222,6 +222,102 @@ void run_immediate_match_id_reuse_test() {
     expect(result.accepted, "immediately matched order id should be reusable");
 }
 
+void run_axi_wrapper_test() {
+    std::uint32_t accepted = 0;
+    std::uint32_t result_code = 0;
+    int touched_price = 0;
+    int touched_total_quantity = 0;
+    std::uint32_t touched_order_count = 0;
+    int executed_quantity = 0;
+    int cancelled_quantity = 0;
+    int remaining_quantity = 0;
+    int last_trade_price = 0;
+    std::uint32_t trade_count = 0;
+    int best_bid_price = 0;
+    int best_bid_quantity = 0;
+    int best_ask_price = 0;
+    int best_ask_quantity = 0;
+    std::uint32_t bid_level_count = 0;
+    std::uint32_t ask_level_count = 0;
+
+    lob::lob_axi_peripheral(lob::CMD_RESET,
+                            lob::BID,
+                            0,
+                            0,
+                            0,
+                            accepted,
+                            result_code,
+                            touched_price,
+                            touched_total_quantity,
+                            touched_order_count,
+                            executed_quantity,
+                            cancelled_quantity,
+                            remaining_quantity,
+                            last_trade_price,
+                            trade_count,
+                            best_bid_price,
+                            best_bid_quantity,
+                            best_ask_price,
+                            best_ask_quantity,
+                            bid_level_count,
+                            ask_level_count);
+    expect(accepted == 1U, "AXI reset should be accepted");
+    expect(bid_level_count == 0U, "AXI reset should clear bid levels");
+    expect(ask_level_count == 0U, "AXI reset should clear ask levels");
+
+    lob::lob_axi_peripheral(lob::CMD_ADD,
+                            lob::BID,
+                            2000,
+                            101,
+                            5,
+                            accepted,
+                            result_code,
+                            touched_price,
+                            touched_total_quantity,
+                            touched_order_count,
+                            executed_quantity,
+                            cancelled_quantity,
+                            remaining_quantity,
+                            last_trade_price,
+                            trade_count,
+                            best_bid_price,
+                            best_bid_quantity,
+                            best_ask_price,
+                            best_ask_quantity,
+                            bid_level_count,
+                            ask_level_count);
+    expect(accepted == 1U, "AXI add should be accepted");
+    expect(result_code == static_cast<std::uint32_t>(lob::RES_ACCEPTED), "AXI add should return accepted status");
+    expect(best_bid_price == 101, "AXI add should update best bid");
+    expect(best_bid_quantity == 5, "AXI add should update best bid quantity");
+
+    lob::lob_axi_peripheral(lob::CMD_CANCEL,
+                            lob::BID,
+                            2000,
+                            0,
+                            0,
+                            accepted,
+                            result_code,
+                            touched_price,
+                            touched_total_quantity,
+                            touched_order_count,
+                            executed_quantity,
+                            cancelled_quantity,
+                            remaining_quantity,
+                            last_trade_price,
+                            trade_count,
+                            best_bid_price,
+                            best_bid_quantity,
+                            best_ask_price,
+                            best_ask_quantity,
+                            bid_level_count,
+                            ask_level_count);
+    expect(accepted == 1U, "AXI cancel should be accepted");
+    expect(result_code == static_cast<std::uint32_t>(lob::RES_CANCELLED), "AXI cancel should return cancelled status");
+    expect(cancelled_quantity == 5, "AXI cancel should report removed quantity");
+    expect(best_bid_price == lob::INVALID_PRICE, "AXI cancel should clear the bid book");
+}
+
 }  // namespace
 
 int main() {
@@ -230,6 +326,7 @@ int main() {
     run_stage3_cancel_tests();
     run_duplicate_id_tests();
     run_immediate_match_id_reuse_test();
+    run_axi_wrapper_test();
     std::cout << "All staged testbench scenarios passed.\n";
     return 0;
 }

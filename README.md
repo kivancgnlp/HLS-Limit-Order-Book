@@ -21,6 +21,10 @@ This project is intentionally designed as an FPGA/HLS learning artifact, not a p
 - `src/lob.cpp`
 - `src/top.cpp`
 - `tb/tb_lob.cpp`
+- `software/baremetal/lob_axi_hw.h`
+- `software/baremetal/lob_axi.h`
+- `software/baremetal/lob_axi.c`
+- `software/baremetal/example_main.c`
 
 ## What It Supports
 
@@ -32,6 +36,7 @@ This project is intentionally designed as an FPGA/HLS learning artifact, not a p
 - Approximate time priority within each price level using a bounded FIFO ring
 - Cancel by order ID for resting orders
 - Single instrument only
+- AXI4-Lite peripheral wrapper for software-driven testing from Zynq
 
 Top-level entry point: [src/top.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/top.cpp)
 
@@ -69,6 +74,71 @@ Cancel support uses a bounded lookup table:
 - then it scans the bounded level queue to remove the exact order
 
 This is a deliberate compromise. The lookup avoids a full-book search on every cancel, while still avoiding unstable pointers or dynamic structures that would synthesize poorly.
+
+## AXI Peripheral Integration
+
+The project now includes a software-friendly AXI4-Lite wrapper in [src/top.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/top.cpp):
+
+- `lob_top(const Command&, CommandResult&)`
+  Internal stateful model wrapper used by the C++ testbench.
+- `lob_axi_peripheral(...)`
+  HLS top-level function intended for IP packaging and software control from Zynq.
+
+`lob_axi_peripheral(...)` exposes command inputs as AXI-Lite registers:
+
+- `cmd_type`
+- `side`
+- `order_id`
+- `price`
+- `quantity`
+
+and returns result fields through AXI-Lite readable registers:
+
+- `accepted`
+- `result_code`
+- `touched_price`
+- `touched_total_quantity`
+- `touched_order_count`
+- `executed_quantity`
+- `cancelled_quantity`
+- `remaining_quantity`
+- `last_trade_price`
+- `trade_count`
+- best bid / ask summary fields
+
+This interface is aimed at a simple Zynq validation flow:
+
+1. Export the HLS component with `lob_axi_peripheral` as the top function.
+2. Add the generated IP into a Vivado Zynq block design.
+3. Connect its AXI4-Lite slave port to the PS AXI master.
+4. From bare-metal or Linux software, write the command registers, start the IP, then read the result registers back.
+
+The wrapper keeps the order book state in static storage, so repeated software calls behave like a persistent in-hardware book rather than a stateless function.
+
+The AXI wrapper now exposes output fields as scalar AXI-Lite registers, which is the right shape for PS software to read back directly after each command completes.
+
+### Bare-Metal Driver
+
+A simple bare-metal MMIO driver and example application are included under [software/baremetal](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal):
+
+- [software/baremetal/lob_axi_hw.h](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal/lob_axi_hw.h)
+  Register offsets and control-bit definitions.
+- [software/baremetal/lob_axi.h](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal/lob_axi.h)
+  Driver API and command/result structs for software.
+- [software/baremetal/lob_axi.c](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal/lob_axi.c)
+  MMIO driver implementation using `Xil_In32` / `Xil_Out32`.
+- [software/baremetal/example_main.c](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal/example_main.c)
+  Small Zynq-side example showing reset, add, match, and cancel commands.
+
+Typical software flow:
+
+1. Initialize the driver with the AXI base address from `xparameters.h`.
+2. Write command fields.
+3. Start the IP by setting `ap_start`.
+4. Poll `ap_done`.
+5. Read back the result/status registers.
+
+Important note: the offsets in `lob_axi_hw.h` match the expected Vitis HLS AXI-Lite register layout for the current argument order, but after exporting the IP you should treat the generated HLS driver header as the final source of truth.
 
 ## Data Structures
 
