@@ -4,6 +4,16 @@ Synthesizable single-instrument limit order book prototype in C++ for Vitis HLS.
 
 This project is intentionally designed as an FPGA/HLS learning artifact, not a production exchange engine. The implementation favors static storage, bounded loops, explicit state transitions, and deterministic behavior over software-centric data structures such as trees, linked lists, hash maps, or heap allocation.
 
+## Why This Project Matters
+
+- Low-latency trading systems often use FPGA acceleration.
+- Order book logic is a core component in exchanges and HFT.
+- Implementing it under HLS constraints requires different thinking than software.
+- This project demonstrates:
+  - hardware-aware data structures
+  - deterministic processing
+  - bounded resource design
+
 ## Repository Layout
 
 - `README.md`
