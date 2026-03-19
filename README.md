@@ -173,7 +173,11 @@ Potential wrapper directions:
 
 ## Vitis HLS Cosimulation Waveform
 
-The screenshot below was generated from Vitis HLS cosimulation for the testbench command stream. The bitmap itself is not stored in this repository yet, but the waveform can be interpreted cleanly from the visible control signals:
+The screenshot below was generated from Vitis HLS cosimulation for the testbench command stream:
+
+![Vitis HLS cosimulation waveform](doc/Waveform.png)
+
+The waveform can be interpreted cleanly from the visible control signals:
 
 - `AP_START` stays asserted for the full testbench run.
 - `AP_DONE` pulses once per completed `lob_top()` transaction.
