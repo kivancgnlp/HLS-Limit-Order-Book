@@ -217,6 +217,43 @@ These are cosimulation-visible wall-clock timings, not implementation latency gu
 - The one-pulse-per-command `AP_DONE` behavior matches the intended one-command-per-call top-level wrapper in [src/top.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/top.cpp).
 - The denser regions later in the capture line up with the Stage 3 tests, where the testbench issues more resets, cancels, and ID-lifecycle checks in quick succession.
 
+## Resource Utilization
+
+The Vitis HLS performance/resource view for this design is shown below:
+
+![Vitis HLS resource utilization](doc/Resource%20utilization.png)
+
+Based on the report screenshot:
+
+- `lob_top` uses about `3 BRAM`, `0 DSP`, `26489 FF`, and `56393 LUT`.
+- The dominant logic footprint is inside `process_command`, reported at about `21835 FF` and `49823 LUT`.
+- Two visible internal loop regions show bounded latencies of about `18 cycles` (`180 ns`) and `130 cycles` (`1.3 us`), which is consistent with linear scans over bounded arrays under a `10 ns` clock assumption.
+
+### Resource Notes
+
+- `0 DSP` is expected because the design is mostly control logic, comparisons, index arithmetic, and register/memory movement rather than arithmetic-heavy datapaths.
+- The `3 BRAM` usage is consistent with storing the persistent book state and lookup structures as synthesized memories instead of fully distributing everything into registers.
+- The relatively high LUT/FF count is not surprising for this style of baseline HLS implementation because `process_command` contains several bounded search and update paths:
+  - price-level search
+  - level insertion/removal shifts
+  - matching over bounded queues
+  - cancel lookup and per-level cancel scan
+- Since the current version prioritizes clarity over aggressive pragma tuning, the report should be read as a baseline reference point rather than a final optimized implementation.
+
+### Likely Area Drivers
+
+- Full `LimitOrderBook` state kept inside one stateful top-level kernel
+- Fixed-capacity arrays sized for `MAX_ORDERS`, `MAX_PRICE_LEVELS`, and `MAX_ORDERS_PER_LEVEL`
+- Control-heavy branching in the shared `process_command` path handling add, match, and cancel
+- Array shifting on price-level insert/delete rather than a narrower price-indexed structure
+
+### Optimization Ideas From This Report
+
+- If the instrument trades in a narrow bounded price range, a price-indexed book could reduce the control cost of sorted level insertion and deletion.
+- Splitting the command paths into more specialized helpers or separate pipeline stages may lower logic pressure compared with one large shared control block.
+- Selective array partitioning or storage binding experiments in Vitis HLS may trade BRAM usage against LUT/register pressure.
+- Tuning `MAX_PRICE_LEVELS` and `MAX_ORDERS_PER_LEVEL` to the intended demo workload will materially affect utilization because these constants directly size the static hardware footprint.
+
 ## Limitations
 
 - Single instrument only
