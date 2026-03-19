@@ -171,6 +171,48 @@ Potential wrapper directions:
 - AXI-Lite control for simple command/result invocation
 - AXI-Stream adaptation for event-driven feed handling
 
+## Vitis HLS Cosimulation Waveform
+
+The screenshot below was generated from Vitis HLS cosimulation for the testbench command stream. The bitmap itself is not stored in this repository yet, but the waveform can be interpreted cleanly from the visible control signals:
+
+- `AP_START` stays asserted for the full testbench run.
+- `AP_DONE` pulses once per completed `lob_top()` transaction.
+- `AP_READY` pulses alongside completed command handling and shows the design is accepting the next transaction without backpressure in this setup.
+- `Active Iterations / Row 0` advances through the testbench command sequence. In the screenshot it reaches roughly `#34`, which is consistent with the staged regression suite in [tb/tb_lob.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/tb/tb_lob.cpp).
+
+### Annotated Process View
+
+The following mapping is inferred from the current testbench order and the visible iteration progression in the waveform. The timing is intentionally rough, based on the 0-100 us scale marks in the screenshot rather than a cycle-accurate exported report.
+
+| Approx. time window | Likely commands in flight | Related testbench phase |
+| --- | --- | --- |
+| `0-3 us` | Initial `CMD_RESET` | Global book clear before the first regression scenario |
+| `3-24 us` | Series of non-crossing `CMD_ADD` operations | Stage 1 regression: bid/ask insertion, price ordering, same-price aggregation |
+| `24-33 us` | Ask setup for sweep scenario, then aggressive bid | Stage 2 full-fill scenario across multiple ask levels |
+| `33-43 us` | Ask setup, then partially marketable bid | Stage 2 partial fill with residual resting on the bid side |
+| `43-52 us` | Same-price ask queue setup, then crossing bid | Stage 2 FIFO-within-level check |
+| `52-79 us` | Bid/ask setup plus several `CMD_CANCEL` operations | Stage 3 cancel-path validation: head cancel, non-head cancel, residual cancel, not-found cancel |
+| `79-96 us` | Add, duplicate-ID reject, cancel, re-add | Stage 3 duplicate active ID handling and ID reuse after cancel |
+| `96-106 us` | Immediate full match, failed cancel of fully filled ID, ID reuse | Final ID lifecycle regression |
+
+### Rough Timing Notes
+
+From the screenshot alone, the total run appears to span about `105-110 us` for roughly `35` top-level transactions. That suggests an average observed transaction spacing of about `3 us` in this cosim setup.
+
+Useful rough observations:
+
+- Simple non-crossing add or reset transactions appear to complete in about `2-3 us` each.
+- Matching transactions that touch multiple resting orders appear slightly wider, roughly `3-5 us`.
+- Cancel transactions appear similar to adds in this bounded design, roughly `2-4 us`, because they use a fixed lookup scan plus a bounded scan inside one price level.
+
+These are cosimulation-visible wall-clock timings, not implementation latency guarantees. For actual cycle counts, initiation interval, and resource/latency tradeoffs, the more meaningful references are the Vitis HLS synthesis and cosim reports.
+
+### What The Waveform Shows About The Design
+
+- No obvious idle gaps or stalls are visible between transactions in this testbench run.
+- The one-pulse-per-command `AP_DONE` behavior matches the intended one-command-per-call top-level wrapper in [src/top.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/top.cpp).
+- The denser regions later in the capture line up with the Stage 3 tests, where the testbench issues more resets, cancels, and ID-lifecycle checks in quick succession.
+
 ## Limitations
 
 - Single instrument only
