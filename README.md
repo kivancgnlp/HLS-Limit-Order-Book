@@ -1,27 +1,10 @@
 # HLS Limit Order Book
 
-This repository contains a portfolio-oriented, synthesizable prototype of a single-instrument electronic limit order book written in C++ for Vitis HLS style flows.
+Synthesizable single-instrument limit order book prototype in C++ for Vitis HLS.
 
-The design is intentionally hardware-oriented rather than software-optimized:
+This project is intentionally designed as an FPGA/HLS learning artifact, not a production exchange engine. The implementation favors static storage, bounded loops, explicit state transitions, and deterministic behavior over software-centric data structures such as trees, linked lists, hash maps, or heap allocation.
 
-- no dynamic memory
-- no STL containers
-- no recursion
-- fixed-size arrays and bounded loops
-- explicit state and command structs
-
-The project is being built in stages. This revision implements **Stage 2**:
-
-- separate bid and ask books
-- add limit orders
-- price-priority insertion
-- bounded FIFO order storage inside each price level
-- aggressive-order matching against the opposite side
-- partial fills with residual quantity optionally resting in-book
-- simple top-level function for HLS integration
-- C++ testbench with insertion and matching scenarios
-
-## Repo Layout
+## Repository Layout
 
 - `README.md`
 - `src/lob.hpp`
@@ -29,139 +12,210 @@ The project is being built in stages. This revision implements **Stage 2**:
 - `src/top.cpp`
 - `tb/tb_lob.cpp`
 
-## Current Architecture
+## What It Supports
 
-The book is modeled as two fixed-capacity arrays of price levels:
+- Separate bid and ask books
+- Limit order add
+- Matching of aggressive incoming limit orders against the opposite side
+- Partial fills
+- Price priority across price levels
+- Approximate time priority within each price level using a bounded FIFO ring
+- Cancel by order ID for resting orders
+- Single instrument only
 
-- bids are kept in descending price order
-- asks are kept in ascending price order
+Top-level entry point: [src/top.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/top.cpp)
 
-Each `PriceLevel` contains:
+Core model: [src/lob.hpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/lob.hpp), [src/lob.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/lob.cpp)
 
-- a fixed price
-- aggregate quantity
-- a bounded FIFO queue of orders at that price
+Testbench: [tb/tb_lob.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/tb/tb_lob.cpp)
 
-This is a deliberate FPGA-friendly compromise. Instead of a tree or hash-map based software book, the implementation uses:
+## Architecture
 
-- bounded linear searches
-- bounded array shifts when inserting a new price level
-- static storage sized by compile-time constants
+The book is built from two fixed-size arrays of price levels:
 
-That is less flexible than a production software matching engine, but much more aligned with synthesis and predictable hardware resource usage.
+- bids sorted in descending price order
+- asks sorted in ascending price order
+
+Each price level stores:
+
+- `price`
+- `total_quantity`
+- `order_count`
+- `head` and `tail` indices
+- a fixed-size `orders[MAX_ORDERS_PER_LEVEL]` array
+
+The matching rule is straightforward:
+
+1. An incoming `CMD_ADD` first checks whether it crosses the opposite side.
+2. If it crosses, matching starts from the best available opposite price.
+3. Inside one level, the queue head is consumed first.
+4. If the incoming order is only partially filled, its residual quantity is inserted as a resting limit order on its own side.
+
+Cancel support uses a bounded lookup table:
+
+- `order_lookup[MAX_ORDERS]`
+- each active entry stores `{order_id, side, price}`
+- cancel first resolves the target side/price via the lookup table
+- then it scans the bounded level queue to remove the exact order
+
+This is a deliberate compromise. The lookup avoids a full-book search on every cancel, while still avoiding unstable pointers or dynamic structures that would synthesize poorly.
 
 ## Data Structures
 
-The core compile-time limits live in [`src/lob.hpp`](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/lob.hpp):
+Important compile-time limits in [src/lob.hpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/lob.hpp):
 
-- `MAX_ORDERS`
-- `MAX_PRICE_LEVELS`
-- `MAX_ORDERS_PER_LEVEL`
-- `INVALID_PRICE`
+- `MAX_ORDERS = 128`
+- `MAX_PRICE_LEVELS = 16`
+- `MAX_ORDERS_PER_LEVEL = 8`
 
-Primary structs:
+Main structs:
 
-- `Order`: one resting order
-- `PriceLevel`: one bounded FIFO queue at a single price
-- `Command`: one input event
-- `CommandResult`: one output status plus a compact book summary
-- `LimitOrderBook`: full single-instrument book state
+- `Order`
+  Resting order payload held inside a price level queue.
+- `PriceLevel`
+  One price bucket with aggregate quantity and bounded FIFO storage.
+- `OrderLookupEntry`
+  Bounded metadata entry used for cancel-by-ID.
+- `Command`
+  Input event for the top-level kernel.
+- `CommandResult`
+  Compact output with acceptance status, fill summary, cancel summary, and top-of-book snapshot.
+- `LimitOrderBook`
+  Entire persistent single-instrument state.
 
 ## Supported Operations
 
-Current implementation supports:
+### `CMD_RESET`
 
-- `CMD_RESET`
-- `CMD_ADD`
+Clears all resting state.
 
-`CMD_ADD` behaves as a limit order submission:
+### `CMD_ADD`
 
-- if it does not cross the opposite side, it rests in-book
-- if it crosses, it matches from the best opposite price level first
-- within one price level, resting orders are consumed FIFO from the queue head
-- if the incoming order is only partially filled, the residual quantity rests on its own side at its limit price
+Represents an incoming limit order.
 
-The implementation does **not** support yet:
+Behavior:
 
-- cancel by order ID
-- market orders
-- multiple instruments
+- If non-crossing, it rests in the book.
+- If crossing, it matches best-price first on the opposite side.
+- If fully filled, no resting order remains.
+- If partially filled, the residual quantity rests using the same order ID.
 
-## Why This Differs From A Normal Software LOB
+### `CMD_CANCEL`
 
-A normal software limit order book often uses:
+Cancels a resting order by `order_id`.
 
-- balanced trees
-- linked lists
-- hash tables
-- dynamic allocation
+Behavior:
 
-Those designs are convenient on CPUs but are not ideal starting points for FPGA/HLS work. This project instead favors:
+- Rejects if the order ID is not currently active in the lookup table.
+- Removes quantity from the owning level.
+- Deletes the level if the cancelled order was the last order at that price.
 
-- static memory layout
-- explicit capacities
-- deterministic control flow
-- small, analyzable loops
+## Result Reporting
 
-That makes the code less feature-rich, but more realistic as a starting point for synthesis experiments.
+`CommandResult` intentionally keeps outputs compact and bounded:
 
-## HLS Considerations
+- `code`
+- `accepted`
+- `executed_quantity`
+- `cancelled_quantity`
+- `remaining_quantity`
+- `last_trade_price`
+- `trade_count`
+- touched level fields
+- best bid / best ask summary
 
-Current code is structured so later Vitis HLS work can focus on:
+This is intentionally more hardware-friendly than emitting a variable-length list of fill events.
 
-- pipelining bounded search loops
-- partitioning small arrays where useful
-- separating hot-path state from debug-oriented outputs
-- evaluating the cost of price-level shifts versus more specialized indexing
+## Hardware Tradeoffs
 
-For Stage 2, pragmas are still intentionally kept out of the code. The priority remains a clean baseline model before applying directive-level tuning.
+This project does not try to replicate every exchange-engine behavior exactly. It chooses FPGA practicality when realism and synthesizability conflict.
 
-## Build The Testbench
+Key tradeoffs:
 
-Example local build:
+- Price levels are stored in bounded arrays, so level insertion/removal may require array shifts.
+- Cancel lookup stores side and price, not direct pointers, because level indices can change after shifts.
+- Per-level time priority is preserved with a bounded ring buffer, but cancel can leave holes that are skipped by the queue head logic.
+- The design returns aggregate fill information instead of a full trade tape.
+- Capacity is explicit and fixed at compile time.
+
+## Why This Is Different From A Normal Software LOB
+
+A software matching engine would commonly use:
+
+- balanced trees for best-price discovery
+- linked lists for price-level queues
+- hash tables for order ID lookup
+- dynamic memory allocation
+
+Those choices are often sensible on a CPU, but they are poor default building blocks for an HLS portfolio project. This implementation instead emphasizes:
+
+- static memory topology
+- bounded loop trip counts
+- deterministic data movement
+- predictable resource growth
+
+## HLS-Oriented Notes
+
+The code includes comments where pragmas could be explored later, but it does not blindly stamp directives everywhere.
+
+Reasonable next experiments in Vitis HLS:
+
+- pipeline bounded linear-search loops
+- consider partial array partitioning for the lookup table or small level queues
+- evaluate whether level arrays should live in LUTRAM or BRAM depending on scaling
+- compare one-command-per-call control versus a streaming wrapper
+- benchmark how much price-level shifting costs in latency and resources
+
+Potential wrapper directions:
+
+- AXI-Lite control for simple command/result invocation
+- AXI-Stream adaptation for event-driven feed handling
+
+## Limitations
+
+- Single instrument only
+- No market orders
+- No modify/replace operation
+- No explicit trade event stream output
+- No risk checks or gateway logic
+- No persistence across power cycles beyond the static kernel model
+- Duplicate active order IDs are rejected, but order IDs are not direct-addressed
+- Throughput and resource use have not yet been benchmarked in the README
+
+## Build And Run The Testbench
 
 ```bash
 g++ -std=c++17 -Wall -Wextra -pedantic src/lob.cpp src/top.cpp tb/tb_lob.cpp -I./src -o tb_lob
 ./tb_lob
 ```
 
-## Roadmap
+## Test Coverage
 
-### Stage 2
+The testbench currently exercises:
 
-- completed in the current revision
+- price-priority insertion for bids and asks
+- same-price aggregation
+- full aggressive sweeps across multiple price levels
+- partial fill plus residual rest
+- FIFO behavior within one price level
+- cancel of head and non-head orders
+- cancel after residual resting
+- duplicate active order ID rejection
+- reuse of order IDs after cancel or full execution
 
-### Stage 3
+## Possible HLS Optimizations
 
-- add cancel by order ID
-- introduce a bounded lookup structure for cancels
-
-### Stage 4
-
-- HLS-oriented cleanup
-- comments for suggested pragmas
-- loop and interface review for synthesis
-
-### Stage 5
-
-- portfolio-quality README polish
-- clearer architecture diagrams and tradeoff notes
-
-## Current Limitations
-
-- single instrument only
-- bounded number of price levels
-- bounded queue depth per price level
-- no cancel path yet
-- duplicate order IDs are not rejected yet
-- no bounded order-ID lookup yet, so cancel support is deferred to Stage 3
-- trade output is intentionally compact: aggregate execution fields are returned rather than a variable-length list of fill records
+- Replace sorted level arrays with a bounded price-indexed structure if the instrument uses a narrow tick range.
+- Split hot fields from cold/debug fields to reduce datapath width.
+- Emit trade events on a fixed-size side channel if downstream processing needs per-fill visibility.
+- Introduce separate ingress, matching, and egress stages for a more pipeline-oriented microarchitecture.
+- Tune constant sizes and storage binding after actual Vitis HLS synthesis reports.
 
 ## Future Work
 
-- multi-instrument support
-- deeper queue handling
-- market orders
-- risk checks
+- Multi-instrument support
+- Deeper queue handling
+- Market orders
+- Risk checks
 - AXI-stream interface adaptation
-- latency/resource benchmarking in Vitis HLS
+- Latency/resource benchmarking in Vitis HLS

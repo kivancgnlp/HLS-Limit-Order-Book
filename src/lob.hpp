@@ -19,7 +19,8 @@ enum Side {
 enum CommandType {
     CMD_NOP = 0,
     CMD_RESET = 1,
-    CMD_ADD = 2
+    CMD_ADD = 2,
+    CMD_CANCEL = 3
 };
 
 enum ResultCode {
@@ -27,11 +28,14 @@ enum ResultCode {
     RES_ACCEPTED = 1,
     RES_MATCHED = 2,
     RES_MATCHED_AND_RESTED = 3,
-    RES_REJECTED_BAD_PRICE = 4,
-    RES_REJECTED_BAD_QUANTITY = 5,
-    RES_REJECTED_BOOK_FULL = 6,
-    RES_REJECTED_LEVEL_FULL = 7,
-    RES_UNSUPPORTED = 8
+    RES_CANCELLED = 4,
+    RES_REJECTED_BAD_PRICE = 5,
+    RES_REJECTED_BAD_QUANTITY = 6,
+    RES_REJECTED_BOOK_FULL = 7,
+    RES_REJECTED_LEVEL_FULL = 8,
+    RES_REJECTED_DUPLICATE_ID = 9,
+    RES_REJECTED_NOT_FOUND = 10,
+    RES_UNSUPPORTED = 11
 };
 
 struct Order {
@@ -60,6 +64,13 @@ struct Command {
     int quantity;
 };
 
+struct OrderLookupEntry {
+    bool active;
+    std::uint32_t order_id;
+    Side side;
+    int price;
+};
+
 struct BookSummary {
     int best_bid_price;
     int best_bid_quantity;
@@ -76,6 +87,7 @@ struct CommandResult {
     int touched_total_quantity;
     std::uint16_t touched_order_count;
     int executed_quantity;
+    int cancelled_quantity;
     int remaining_quantity;
     int last_trade_price;
     std::uint16_t trade_count;
@@ -85,8 +97,10 @@ struct CommandResult {
 struct LimitOrderBook {
     PriceLevel bids[MAX_PRICE_LEVELS];
     PriceLevel asks[MAX_PRICE_LEVELS];
+    OrderLookupEntry order_lookup[MAX_ORDERS];
     std::uint16_t bid_level_count;
     std::uint16_t ask_level_count;
+    std::uint16_t active_order_count;
 };
 
 void init_level(PriceLevel &level);
