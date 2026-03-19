@@ -25,11 +25,13 @@ enum CommandType {
 enum ResultCode {
     RES_NONE = 0,
     RES_ACCEPTED = 1,
-    RES_REJECTED_BAD_PRICE = 2,
-    RES_REJECTED_BAD_QUANTITY = 3,
-    RES_REJECTED_BOOK_FULL = 4,
-    RES_REJECTED_LEVEL_FULL = 5,
-    RES_UNSUPPORTED = 6
+    RES_MATCHED = 2,
+    RES_MATCHED_AND_RESTED = 3,
+    RES_REJECTED_BAD_PRICE = 4,
+    RES_REJECTED_BAD_QUANTITY = 5,
+    RES_REJECTED_BOOK_FULL = 6,
+    RES_REJECTED_LEVEL_FULL = 7,
+    RES_UNSUPPORTED = 8
 };
 
 struct Order {
@@ -73,6 +75,10 @@ struct CommandResult {
     int touched_price;
     int touched_total_quantity;
     std::uint16_t touched_order_count;
+    int executed_quantity;
+    int remaining_quantity;
+    int last_trade_price;
+    std::uint16_t trade_count;
     BookSummary summary;
 };
 

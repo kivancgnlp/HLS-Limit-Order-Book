@@ -8,6 +8,10 @@ static void reset_result(CommandResult &result) {
     result.touched_price = INVALID_PRICE;
     result.touched_total_quantity = 0;
     result.touched_order_count = 0;
+    result.executed_quantity = 0;
+    result.remaining_quantity = 0;
+    result.last_trade_price = INVALID_PRICE;
+    result.trade_count = 0;
     result.summary.best_bid_price = INVALID_PRICE;
     result.summary.best_bid_quantity = 0;
     result.summary.best_ask_price = INVALID_PRICE;
@@ -119,6 +123,41 @@ static void shift_levels_right(PriceLevel levels[MAX_PRICE_LEVELS],
     }
 }
 
+static void shift_levels_left(PriceLevel levels[MAX_PRICE_LEVELS],
+                              std::uint16_t &level_count,
+                              std::uint16_t remove_index) {
+    for (std::uint16_t i = remove_index; i + 1 < level_count; ++i) {
+        levels[i] = levels[i + 1];
+    }
+
+    if (level_count > 0) {
+        init_level(levels[level_count - 1]);
+        level_count = static_cast<std::uint16_t>(level_count - 1);
+    }
+}
+
+static bool is_crossing(Side incoming_side, int incoming_price, int resting_price) {
+    if (incoming_side == BID) {
+        return incoming_price >= resting_price;
+    }
+
+    return incoming_price <= resting_price;
+}
+
+static void consume_head_order(PriceLevel &level, int fill_quantity) {
+    const std::uint16_t slot = level.head;
+    level.orders[slot].quantity -= fill_quantity;
+    level.total_quantity -= fill_quantity;
+
+    if (level.orders[slot].quantity == 0) {
+        level.orders[slot].valid = false;
+        level.orders[slot].order_id = 0;
+        level.orders[slot].price = INVALID_PRICE;
+        level.order_count = static_cast<std::uint16_t>(level.order_count - 1);
+        level.head = static_cast<std::uint16_t>((level.head + 1) % MAX_ORDERS_PER_LEVEL);
+    }
+}
+
 static ResultCode add_order_to_side(PriceLevel levels[MAX_PRICE_LEVELS],
                                     std::uint16_t &level_count,
                                     const Command &cmd,
@@ -159,10 +198,58 @@ static ResultCode add_order_to_side(PriceLevel levels[MAX_PRICE_LEVELS],
     return RES_ACCEPTED;
 }
 
+static void match_against_side(PriceLevel levels[MAX_PRICE_LEVELS],
+                               std::uint16_t &level_count,
+                               const Command &cmd,
+                               CommandResult &result,
+                               int &remaining_quantity) {
+    for (std::size_t level_iter = 0;
+         level_iter < MAX_PRICE_LEVELS && remaining_quantity > 0 && level_count > 0;
+         ++level_iter) {
+        PriceLevel &best_level = levels[0];
+
+        if (!is_crossing(cmd.side, cmd.price, best_level.price)) {
+            break;
+        }
+
+        result.touched_price = best_level.price;
+
+        for (std::size_t order_iter = 0;
+             order_iter < MAX_ORDERS_PER_LEVEL && remaining_quantity > 0 && best_level.order_count > 0;
+             ++order_iter) {
+            const std::uint16_t slot = best_level.head;
+
+            if (!best_level.orders[slot].valid) {
+                break;
+            }
+
+            const int resting_quantity = best_level.orders[slot].quantity;
+            const int fill_quantity = (remaining_quantity < resting_quantity) ? remaining_quantity : resting_quantity;
+
+            remaining_quantity -= fill_quantity;
+            result.executed_quantity += fill_quantity;
+            result.last_trade_price = best_level.price;
+            result.trade_count = static_cast<std::uint16_t>(result.trade_count + 1);
+
+            consume_head_order(best_level, fill_quantity);
+        }
+
+        if (best_level.order_count == 0) {
+            result.touched_total_quantity = 0;
+            result.touched_order_count = 0;
+            shift_levels_left(levels, level_count, 0);
+        } else {
+            result.touched_total_quantity = best_level.total_quantity;
+            result.touched_order_count = best_level.order_count;
+        }
+    }
+}
+
 void process_command(LimitOrderBook &book, const Command &cmd, CommandResult &result) {
     reset_result(result);
 
     if (cmd.type == CMD_NOP) {
+        result.remaining_quantity = 0;
         summarize_book(book, result.summary);
         return;
     }
@@ -171,6 +258,7 @@ void process_command(LimitOrderBook &book, const Command &cmd, CommandResult &re
         reset_book(book);
         result.accepted = true;
         result.code = RES_ACCEPTED;
+        result.remaining_quantity = 0;
         summarize_book(book, result.summary);
         return;
     }
@@ -182,37 +270,68 @@ void process_command(LimitOrderBook &book, const Command &cmd, CommandResult &re
     }
 
     if (cmd.price <= 0) {
+        result.remaining_quantity = cmd.quantity;
         result.code = RES_REJECTED_BAD_PRICE;
         summarize_book(book, result.summary);
         return;
     }
 
     if (cmd.quantity <= 0) {
+        result.remaining_quantity = cmd.quantity;
         result.code = RES_REJECTED_BAD_QUANTITY;
         summarize_book(book, result.summary);
         return;
     }
 
-    ResultCode code = RES_UNSUPPORTED;
+    int remaining_quantity = cmd.quantity;
+    ResultCode code = RES_ACCEPTED;
 
     if (cmd.side == BID) {
-        code = add_order_to_side(book.bids,
-                                 book.bid_level_count,
-                                 cmd,
-                                 result.touched_price,
-                                 result.touched_total_quantity,
-                                 result.touched_order_count);
+        match_against_side(book.asks, book.ask_level_count, cmd, result, remaining_quantity);
+        if (remaining_quantity > 0) {
+            Command residual_cmd = cmd;
+            residual_cmd.quantity = remaining_quantity;
+            code = add_order_to_side(book.bids,
+                                     book.bid_level_count,
+                                     residual_cmd,
+                                     result.touched_price,
+                                     result.touched_total_quantity,
+                                     result.touched_order_count);
+            if (code == RES_ACCEPTED) {
+                remaining_quantity = 0;
+            }
+        } else {
+            code = RES_MATCHED;
+        }
     } else {
-        code = add_order_to_side(book.asks,
-                                 book.ask_level_count,
-                                 cmd,
-                                 result.touched_price,
-                                 result.touched_total_quantity,
-                                 result.touched_order_count);
+        match_against_side(book.bids, book.bid_level_count, cmd, result, remaining_quantity);
+        if (remaining_quantity > 0) {
+            Command residual_cmd = cmd;
+            residual_cmd.quantity = remaining_quantity;
+            code = add_order_to_side(book.asks,
+                                     book.ask_level_count,
+                                     residual_cmd,
+                                     result.touched_price,
+                                     result.touched_total_quantity,
+                                     result.touched_order_count);
+            if (code == RES_ACCEPTED) {
+                remaining_quantity = 0;
+            }
+        } else {
+            code = RES_MATCHED;
+        }
+    }
+
+    if (result.executed_quantity > 0 && code == RES_ACCEPTED) {
+        code = RES_MATCHED_AND_RESTED;
     }
 
     result.code = code;
-    result.accepted = (code == RES_ACCEPTED);
+    result.accepted = (result.executed_quantity > 0 ||
+                       code == RES_ACCEPTED ||
+                       code == RES_MATCHED ||
+                       code == RES_MATCHED_AND_RESTED);
+    result.remaining_quantity = remaining_quantity;
     summarize_book(book, result.summary);
 }
 

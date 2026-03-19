@@ -10,14 +10,16 @@ The design is intentionally hardware-oriented rather than software-optimized:
 - fixed-size arrays and bounded loops
 - explicit state and command structs
 
-The project is being built in stages. This commit implements **Stage 1**:
+The project is being built in stages. This revision implements **Stage 2**:
 
 - separate bid and ask books
-- add limit order only
+- add limit orders
 - price-priority insertion
 - bounded FIFO order storage inside each price level
+- aggressive-order matching against the opposite side
+- partial fills with residual quantity optionally resting in-book
 - simple top-level function for HLS integration
-- basic C++ testbench
+- C++ testbench with insertion and matching scenarios
 
 ## Repo Layout
 
@@ -27,7 +29,7 @@ The project is being built in stages. This commit implements **Stage 1**:
 - `src/top.cpp`
 - `tb/tb_lob.cpp`
 
-## Stage 1 Architecture
+## Current Architecture
 
 The book is modeled as two fixed-capacity arrays of price levels:
 
@@ -67,15 +69,20 @@ Primary structs:
 
 ## Supported Operations
 
-Stage 1 supports:
+Current implementation supports:
 
 - `CMD_RESET`
 - `CMD_ADD`
 
-Stage 1 does **not** support yet:
+`CMD_ADD` behaves as a limit order submission:
 
-- matching
-- partial fills
+- if it does not cross the opposite side, it rests in-book
+- if it crosses, it matches from the best opposite price level first
+- within one price level, resting orders are consumed FIFO from the queue head
+- if the incoming order is only partially filled, the residual quantity rests on its own side at its limit price
+
+The implementation does **not** support yet:
+
 - cancel by order ID
 - market orders
 - multiple instruments
@@ -107,7 +114,7 @@ Current code is structured so later Vitis HLS work can focus on:
 - separating hot-path state from debug-oriented outputs
 - evaluating the cost of price-level shifts versus more specialized indexing
 
-For Stage 1, pragmas are intentionally kept out of the code. The priority is a clean baseline model first.
+For Stage 2, pragmas are still intentionally kept out of the code. The priority remains a clean baseline model before applying directive-level tuning.
 
 ## Build The Testbench
 
@@ -122,9 +129,7 @@ g++ -std=c++17 -Wall -Wextra -pedantic src/lob.cpp src/top.cpp tb/tb_lob.cpp -I.
 
 ### Stage 2
 
-- add matching against the opposite side
-- support partial fills
-- maintain book quantities after fills
+- completed in the current revision
 
 ### Stage 3
 
@@ -147,9 +152,10 @@ g++ -std=c++17 -Wall -Wextra -pedantic src/lob.cpp src/top.cpp tb/tb_lob.cpp -I.
 - single instrument only
 - bounded number of price levels
 - bounded queue depth per price level
-- insertion-only behavior in this stage
+- no cancel path yet
 - duplicate order IDs are not rejected yet
-- no matching logic yet, so crossed books can exist in Stage 1
+- no bounded order-ID lookup yet, so cancel support is deferred to Stage 3
+- trade output is intentionally compact: aggregate execution fields are returned rather than a variable-length list of fill records
 
 ## Future Work
 

@@ -22,9 +22,8 @@ lob::Command make_add(lob::Side side, std::uint32_t order_id, int price, int qua
     return cmd;
 }
 
-void run_stage1_tests() {
+void reset_book() {
     lob::CommandResult result;
-
     lob::Command reset_cmd;
     reset_cmd.type = lob::CMD_RESET;
     reset_cmd.side = lob::BID;
@@ -32,13 +31,19 @@ void run_stage1_tests() {
     reset_cmd.price = 0;
     reset_cmd.quantity = 0;
     lob::lob_top(reset_cmd, result);
-
     expect(result.accepted, "reset should be accepted");
     expect(result.summary.bid_level_count == 0, "reset should clear bid levels");
     expect(result.summary.ask_level_count == 0, "reset should clear ask levels");
+}
+
+void run_stage1_regression_tests() {
+    lob::CommandResult result;
+
+    reset_book();
 
     lob::lob_top(make_add(lob::BID, 1, 100, 10), result);
     expect(result.accepted, "first bid add should be accepted");
+    expect(result.code == lob::RES_ACCEPTED, "resting bid should return accepted");
     expect(result.summary.best_bid_price == 100, "best bid should be 100");
     expect(result.summary.best_bid_quantity == 10, "best bid quantity should be 10");
     expect(result.summary.bid_level_count == 1, "there should be one bid level");
@@ -74,10 +79,71 @@ void run_stage1_tests() {
     expect(result.summary.best_bid_price == 101, "best bid should remain 101");
 }
 
+void run_full_fill_test() {
+    lob::CommandResult result;
+
+    reset_book();
+
+    lob::lob_top(make_add(lob::ASK, 100, 105, 4), result);
+    lob::lob_top(make_add(lob::ASK, 101, 106, 6), result);
+
+    lob::lob_top(make_add(lob::BID, 200, 106, 10), result);
+    expect(result.accepted, "crossing bid should be accepted");
+    expect(result.code == lob::RES_MATCHED, "full aggressive fill should report matched");
+    expect(result.executed_quantity == 10, "full fill should execute all incoming quantity");
+    expect(result.remaining_quantity == 0, "full fill should leave no residual quantity");
+    expect(result.trade_count == 2, "full fill should consume two resting orders");
+    expect(result.last_trade_price == 106, "last trade price should equal final resting level");
+    expect(result.summary.best_ask_price == lob::INVALID_PRICE, "all asks should be consumed");
+    expect(result.summary.ask_level_count == 0, "ask book should be empty after full fill");
+}
+
+void run_partial_fill_and_rest_test() {
+    lob::CommandResult result;
+
+    reset_book();
+
+    lob::lob_top(make_add(lob::ASK, 300, 105, 5), result);
+    lob::lob_top(make_add(lob::ASK, 301, 107, 3), result);
+
+    lob::lob_top(make_add(lob::BID, 400, 106, 8), result);
+    expect(result.accepted, "partially marketable bid should be accepted");
+    expect(result.code == lob::RES_MATCHED_AND_RESTED, "partial match plus residual rest should be reported");
+    expect(result.executed_quantity == 5, "only crossed liquidity should execute");
+    expect(result.remaining_quantity == 0, "residual should be rested, not left pending");
+    expect(result.trade_count == 1, "only one resting order should trade");
+    expect(result.last_trade_price == 105, "trade should occur at resting ask price");
+    expect(result.summary.best_bid_price == 106, "residual bid should rest at its limit price");
+    expect(result.summary.best_bid_quantity == 3, "resting residual should keep remaining quantity");
+    expect(result.summary.best_ask_price == 107, "uncrossed ask should remain");
+}
+
+void run_fifo_within_level_test() {
+    lob::CommandResult result;
+
+    reset_book();
+
+    lob::lob_top(make_add(lob::ASK, 500, 105, 2), result);
+    lob::lob_top(make_add(lob::ASK, 501, 105, 4), result);
+
+    lob::lob_top(make_add(lob::BID, 600, 105, 3), result);
+    expect(result.accepted, "same-price crossing bid should be accepted");
+    expect(result.code == lob::RES_MATCHED, "same-price match should report matched");
+    expect(result.executed_quantity == 3, "incoming quantity should execute");
+    expect(result.trade_count == 2, "fill should consume the first order then part of the second");
+    expect(result.last_trade_price == 105, "trade price should remain on the matched level");
+    expect(result.summary.best_ask_price == 105, "partially consumed ask level should remain");
+    expect(result.summary.best_ask_quantity == 3, "remaining ask quantity should stay on the level");
+    expect(result.summary.ask_level_count == 1, "same-price queue should remain one level");
+}
+
 }  // namespace
 
 int main() {
-    run_stage1_tests();
-    std::cout << "Stage 1 testbench passed.\n";
+    run_stage1_regression_tests();
+    run_full_fill_test();
+    run_partial_fill_and_rest_test();
+    run_fifo_within_level_test();
+    std::cout << "Stage 2 testbench passed.\n";
     return 0;
 }
