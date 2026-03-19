@@ -38,11 +38,11 @@ This project is intentionally designed as an FPGA/HLS learning artifact, not a p
 - Single instrument only
 - AXI4-Lite peripheral wrapper for software-driven testing from Zynq
 
-Top-level entry point: [src/top.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/top.cpp)
+Top-level entry point: [src/top.cpp](src/top.cpp)
 
-Core model: [src/lob.hpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/lob.hpp), [src/lob.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/lob.cpp)
+Core model: [src/lob.hpp](src/lob.hpp), [src/lob.cpp](src/lob.cpp)
 
-Testbench: [tb/tb_lob.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/tb/tb_lob.cpp)
+Testbench: [tb/tb_lob.cpp](tb/tb_lob.cpp)
 
 ## Architecture
 
@@ -77,7 +77,7 @@ This is a deliberate compromise. The lookup avoids a full-book search on every c
 
 ## AXI Peripheral Integration
 
-The project now includes a software-friendly AXI4-Lite wrapper in [src/top.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/top.cpp):
+The project now includes a software-friendly AXI4-Lite wrapper in [src/top.cpp](src/top.cpp):
 
 - `lob_top(const Command&, CommandResult&)`
   Internal stateful model wrapper used by the C++ testbench.
@@ -119,15 +119,15 @@ The AXI wrapper now exposes output fields as scalar AXI-Lite registers, which is
 
 ### Bare-Metal Driver
 
-A simple bare-metal MMIO driver and example application are included under [software/baremetal](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal):
+A simple bare-metal MMIO driver and example application are included under [software/baremetal](software/baremetal):
 
-- [software/baremetal/lob_axi_hw.h](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal/lob_axi_hw.h)
+- [software/baremetal/lob_axi_hw.h](software/baremetal/lob_axi_hw.h)
   Register offsets and control-bit definitions.
-- [software/baremetal/lob_axi.h](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal/lob_axi.h)
+- [software/baremetal/lob_axi.h](software/baremetal/lob_axi.h)
   Driver API and command/result structs for software.
-- [software/baremetal/lob_axi.c](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal/lob_axi.c)
+- [software/baremetal/lob_axi.c](software/baremetal/lob_axi.c)
   MMIO driver implementation using `Xil_In32` / `Xil_Out32`.
-- [software/baremetal/example_main.c](/Users/kivanc/GitHub/HLS-Limit-Order-Book/software/baremetal/example_main.c)
+- [software/baremetal/example_main.c](software/baremetal/example_main.c)
   Small Zynq-side example showing reset, add, match, and cancel commands.
 
 Typical software flow:
@@ -142,7 +142,7 @@ Important note: the offsets in `lob_axi_hw.h` match the expected Vitis HLS AXI-L
 
 ## Data Structures
 
-Important compile-time limits in [src/lob.hpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/lob.hpp):
+Important compile-time limits in [src/lob.hpp](src/lob.hpp):
 
 - `MAX_ORDERS = 128`
 - `MAX_PRICE_LEVELS = 16`
@@ -262,7 +262,7 @@ The waveform can be interpreted cleanly from the visible control signals:
 - `AP_START` stays asserted for the full testbench run.
 - `AP_DONE` pulses once per completed `lob_top()` transaction.
 - `AP_READY` pulses alongside completed command handling and shows the design is accepting the next transaction without backpressure in this setup.
-- `Active Iterations / Row 0` advances through the testbench command sequence. In the screenshot it reaches roughly `#34`, which is consistent with the staged regression suite in [tb/tb_lob.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/tb/tb_lob.cpp).
+- `Active Iterations / Row 0` advances through the testbench command sequence. In the screenshot it reaches roughly `#34`, which is consistent with the staged regression suite in [tb/tb_lob.cpp](tb/tb_lob.cpp).
 
 ### Annotated Process View
 
@@ -294,7 +294,7 @@ These are cosimulation-visible wall-clock timings, not implementation latency gu
 ### What The Waveform Shows About The Design
 
 - No obvious idle gaps or stalls are visible between transactions in this testbench run.
-- The one-pulse-per-command `AP_DONE` behavior matches the intended one-command-per-call top-level wrapper in [src/top.cpp](/Users/kivanc/GitHub/HLS-Limit-Order-Book/src/top.cpp).
+- The one-pulse-per-command `AP_DONE` behavior matches the intended one-command-per-call top-level wrapper in [src/top.cpp](src/top.cpp).
 - The denser regions later in the capture line up with the Stage 3 tests, where the testbench issues more resets, cancels, and ID-lifecycle checks in quick succession.
 
 ## Resource Utilization
